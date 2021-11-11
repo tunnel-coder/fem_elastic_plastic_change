@@ -1,5 +1,6 @@
 # FEM
 import numpy as np
+from numba import njit
 
 # создание окна
 from tkinter import *
@@ -37,6 +38,7 @@ def geometry_matrix_element(B, xi, xj, xm, zi, zj, zm):
     return BT
 
 
+@njit
 def elastic_matrix_element(D, E, nu):
     Enu = E / (1 + nu)
     D[0, 0] = (1 - nu) / (1 - 2 * nu) * Enu
@@ -51,6 +53,7 @@ def elastic_matrix_element(D, E, nu):
     return D
 
 
+@njit
 def plastic_matrix_element(k, it, sx, sz, txz, kst, nu, fi, D, pl, E):
     if pl[k - 1] == 0:
         return D
@@ -80,7 +83,6 @@ def plastic_matrix_element(k, it, sx, sz, txz, kst, nu, fi, D, pl, E):
     D[2, 1] = D[1, 2]
     D[2, 2] = D[2, 2] - p3 * p3 / q0 * Enu
     return D
-
 
 
 def stiffness_matrix_local(BT, D, B, xi, xj, xm, zi, zj, zm):
@@ -113,6 +115,7 @@ def stiffness_matrix_total(kglob, ki, kj, kloc, km):
     return kglob
 
 
+@njit
 def strains(du, B, ki, kj, km, k, dex, dez, dexz, kst, ex, ez, exz):
     dex[k - 1] = (du[2 * ki - 2] * B[0, 0] + du[2 * kj - 2] * B[0, 2] + du[2 * km - 2] * B[0, 4])
     dez[k - 1] = (du[2 * ki - 1] * B[1, 1] + du[2 * kj - 1] * B[1, 3] + du[2 * km - 1] * B[1, 5])
@@ -129,6 +132,7 @@ def strains(du, B, ki, kj, km, k, dex, dez, dexz, kst, ex, ez, exz):
     return dex, dez, dexz, ex, ez, exz
 
 
+@njit
 def stresses(D, dex, dez, dexz, k, dsx, dsz, dtxz, s1, s3, kst, sx, sz, txz):
     dsx[k - 1] = D[0, 0] * dex[k - 1] + D[0, 1] * dez[k - 1] + D[0, 2] * dexz[k - 1]
     dsz[k - 1] = D[1, 0] * dex[k - 1] + D[1, 1] * dez[k - 1] + D[1, 2] * dexz[k - 1]
@@ -148,7 +152,7 @@ def stresses(D, dex, dez, dexz, k, dsx, dsz, dtxz, s1, s3, kst, sx, sz, txz):
     s3[kst - 1, k - 1] = (sx[kst - 1, k - 1] + sz[kst - 1, k - 1]) / 2 - np.sqrt((sx[kst - 1, k - 1]
                                                                                   - sz[kst - 1, k - 1]) ** 2 / 4
                                                                                  + txz[kst - 1, k - 1] ** 2)
-    return dex, dez, dexz, sx, sz, txz, s1, s3
+    return sx, sz, txz, s1, s3
 
 
 def stress_average(k, dex, dez, dexz, D, dsx, dsz, dtxz, kst, sx, sz, txz, s1, s3):
@@ -181,13 +185,15 @@ def stress_average(k, dex, dez, dexz, D, dsx, dsz, dtxz, kst, sx, sz, txz, s1, s
                          - np.sqrt((sx[kst - 1, k - 1] - sz[kst - 1, k - 1]) ** 2 / 4 + txz[kst - 1, k - 1] ** 2)
     s1[kst - 1, k - 2] = s1[kst - 1, k - 1]
     s3[kst - 1, k - 2] = s3[kst - 1, k - 1]
-    return dex, dez, dexz, sx, sz, txz, s1, s3
+    return sx, sz, txz, s1, s3
 
 
+@njit
 def funcplast(sxFp, szFp, txzFp, fi, c):
     return np.sqrt((szFp - sxFp) ** 2 + 4 * txzFp ** 2) - ((szFp + sxFp) * np.sin(fi) + 2 * c * np.cos(fi))
 
 
+@njit
 def function_plastic(sx, sz, txz, kst, k, fi, c, it, Fp, FF, pl, npl, nu, xi, xj, xm, zi, zj, zm, ki, kj, km, B, dR,
                      dex, dez, dexz, ex, ez, exz, E, plastic, average):
     if plastic == 0:
@@ -280,6 +286,149 @@ def function_plastic(sx, sz, txz, kst, k, fi, c, it, Fp, FF, pl, npl, nu, xi, xj
         ez[kst - 1, k - 1] = ez[kst - 1, k - 2]
         exz[kst - 1, k - 1] = exz[kst - 1, k - 2]
     return sx, sz, txz, ex, ez, exz, dR, npl, Fp, FF, dex, dez, dexz
+
+
+# noinspection PyGlobalUndefined
+def mesh():
+    kx, kz, kxt, kzt, nw, nh = kx_glob, kz_glob, kxt_glob, kzt_glob, nw_glob, nh_glob
+    ax.clear()
+    ax.plot(kx, -kz, color='blue', linewidth=0.4)
+    ax.plot(kxt, -kzt, color='blue', linewidth=0.4)
+    for i in range(nh):
+        for j in range(nw):
+            ax.plot([kx[i + 1, j], kx[i, j + 1]], [-kz[i + 1, j], -kz[i, j + 1]], color='blue', linewidth=0.4)
+    ax.xaxis.set_major_locator(ticker.MultipleLocator(0.5))
+    ax.yaxis.set_major_locator(ticker.MultipleLocator(0.5))
+    canvas.draw()
+    canvas.get_tk_widget().place(x=175, y=0)
+    return
+
+
+def deform():
+    kx_new, kz_new, kxt_new, kzt_new, nw, nh = kx_new_glob, kz_new_glob, kxt_new_glob, kzt_new_glob, nw_glob, nh_glob
+    ax.plot(kx_new, -kz_new, color='red', linewidth=0.4)
+    ax.plot(kxt_new, -kzt_new, color='red', linewidth=0.4)
+    for i in range(nh):
+        for j in range(nw):
+            ax.plot([kx_new[i + 1, j], kx_new[i, j + 1]], [-kz_new[i + 1, j], -kz_new[i, j + 1]], color='red',
+                    linewidth=0.4)
+    ax.xaxis.set_major_locator(ticker.MultipleLocator(0.5))
+    ax.yaxis.set_major_locator(ticker.MultipleLocator(0.5))
+    canvas.draw()
+    canvas.get_tk_widget().place(x=175, y=0)
+    return
+
+
+def pl_st():
+    kx, kz, nw, nh, pl = kx_glob, kz_glob, nw_glob, nh_glob, pl_glob
+    ax.clear()
+    k = 0
+    for i in range(1, nw + 1):
+        for j in range(1, nh + 1):
+            k = k + 1
+            xi, xj, xm = kx[j - 1, i - 1], kx[j, i - 1], kx[j - 1, i]
+            zi, zj, zm = kz[j - 1, i - 1], kz[j, i - 1], kz[j - 1, i]
+            coord = [[xi, -zi], [xj, -zj], [xm, -zm], [xi, -zi]]
+            xs, zs = zip(*coord)
+            if pl[k - 1] == 1:
+                ax.fill(xs, zs, "crimson")
+            else:
+                ax.fill(xs, zs, "dodgerblue")
+
+            k = k + 1
+            xi, xj, xm = kx[j, i - 1], kx[j - 1, i], kx[j, i]
+            zi, zj, zm = kz[j, i - 1], kz[j - 1, i], kz[j, i]
+            coord = [[xi, -zi], [xj, -zj], [xm, -zm], [xi, -zi]]
+            xs, zs = zip(*coord)
+            if pl[k - 1] == 1:
+                ax.fill(xs, zs, "crimson")
+            else:
+                ax.fill(xs, zs, "dodgerblue")
+    ax.xaxis.set_major_locator(ticker.MultipleLocator(0.5))
+    ax.yaxis.set_major_locator(ticker.MultipleLocator(0.5))
+    canvas.draw()
+    canvas.get_tk_widget().place(x=175, y=0)
+    return
+
+
+def graphic(var):
+    kx, kz, nw, nh = kx_glob, kz_glob, nw_glob, nh_glob
+    if var == "s1":
+        s = s1_glob
+    elif var == "s3":
+        s = s3_glob
+    elif var == "sx":
+        s = sx_glob
+    elif var == "sz":
+        s = sz_glob
+    elif var == "txz":
+        s = txz_glob
+    elif var == "ex":
+        s = ex_glob
+    elif var == "ez":
+        s = ez_glob
+    elif var == "exz":
+        s = exz_glob
+
+    ax.clear()
+    s_max = np.amax(s[-1, :])
+    s_min = np.amin(s[-1, :])
+    s_prom = (s_max - s_min) / 6
+    k = 0
+    for i in range(1, nw + 1):
+        for j in range(1, nh + 1):
+            k = k + 1
+            xi, xj, xm = kx[j - 1, i - 1], kx[j, i - 1], kx[j - 1, i]
+            zi, zj, zm = kz[j - 1, i - 1], kz[j, i - 1], kz[j - 1, i]
+            coord = [[xi, -zi], [xj, -zj], [xm, -zm], [xi, -zi]]
+            xs, zs = zip(*coord)
+            if s[-1, k - 1] <= (s_min + s_prom):
+                ax.fill(xs, zs, "#0000FF")
+            elif s[-1, k - 1] <= (s_min + 2 * s_prom):
+                ax.fill(xs, zs, "#3300CC")
+            elif s[-1, k - 1] <= (s_min + 3 * s_prom):
+                ax.fill(xs, zs, "#660099")
+            elif s[-1, k - 1] <= (s_min + 4 * s_prom):
+                ax.fill(xs, zs, "#990066")
+            elif s[-1, k - 1] <= (s_min + 5 * s_prom):
+                ax.fill(xs, zs, "#CC0033")
+            else:
+                ax.fill(xs, zs, "#FF0000")
+
+            k = k + 1
+            xi, xj, xm = kx[j, i - 1], kx[j - 1, i], kx[j, i]
+            zi, zj, zm = kz[j, i - 1], kz[j - 1, i], kz[j, i]
+            coord = [[xi, -zi], [xj, -zj], [xm, -zm], [xi, -zi]]
+            xs, zs = zip(*coord)
+            if s[-1, k - 1] <= (s_min + s_prom):
+                ax.fill(xs, zs, "#0000FF")
+            elif s[-1, k - 1] <= (s_min + 2 * s_prom):
+                ax.fill(xs, zs, "#3300CC")
+            elif s[-1, k - 1] <= (s_min + 3 * s_prom):
+                ax.fill(xs, zs, "#660099")
+            elif s[-1, k - 1] <= (s_min + 4 * s_prom):
+                ax.fill(xs, zs, "#990066")
+            elif s[-1, k - 1] <= (s_min + 5 * s_prom):
+                ax.fill(xs, zs, "#CC0033")
+            else:
+                ax.fill(xs, zs, "#FF0000")
+    ax.xaxis.set_major_locator(ticker.MultipleLocator(0.5))
+    ax.yaxis.set_major_locator(ticker.MultipleLocator(0.5))
+
+    canvas.draw()
+    canvas.get_tk_widget().place(x=175, y=0)
+    return
+
+
+def node_numb():
+    kx, kz, n_nmb, nw, nh = kx_glob, kz_glob, n_nmb_glob, nw_glob, nh_glob
+    for i in range(nh + 1):
+        for j in range(nw + 1):
+            ax.text(kx[i, j], -kz[i, j], n_nmb[i, j].astype(int), fontsize=5, fontstyle='italic')
+    ax.xaxis.set_major_locator(ticker.MultipleLocator(0.5))
+    ax.yaxis.set_major_locator(ticker.MultipleLocator(0.5))
+    canvas.draw()
+    canvas.get_tk_widget().place(x=175, y=0)
 
 
 class Application(Frame):
@@ -397,6 +546,35 @@ class Application(Frame):
         Button(self, text="Solve", command=self.solver, font="Helvetica 9 italic").grid(row=21, column=0,
                                                                                         columnspan=3, sticky='EW')
 
+        menubar = Menu(self.master)
+        self.master.config(menu=menubar)
+
+        fileMenu1 = Menu(menubar, tearoff=0)
+        fileMenu1.add_command(label="Mesh", command=mesh)
+        fileMenu1.add_command(label="Deform view", command=deform)
+        fileMenu1.add_command(label="Nodes number", command=node_numb)
+        menubar.add_cascade(label="Mesh", menu=fileMenu1)
+
+        fileMenu = Menu(menubar, tearoff=0)
+        submenu1 = Menu(fileMenu, tearoff=0)
+        submenu1.add_command(label=u"\u03C3" + u"\u02E3", command=lambda: graphic("sx"))
+        submenu1.add_command(label=u"\u03C3" + u"\u1DBB", command=lambda: graphic("sz"))
+        submenu1.add_command(label=u"\u03C4" + u"\u02E3" + u"\u1DBB", command=lambda: graphic("txz"))
+        submenu1.add_separator()
+        submenu1.add_command(label=u"\u03C3" + u"\u00B9", command=lambda: graphic("s1"))
+        submenu1.add_command(label=u"\u03C3" + u"\u00B3", command=lambda: graphic("s3"))
+        submenu1.add_separator()
+        submenu1.add_command(label="Plastic", command=pl_st)
+        fileMenu.add_cascade(label='Stresses', menu=submenu1, underline=0)
+        fileMenu.add_separator()
+        submenu2 = Menu(fileMenu, tearoff=0)
+        submenu2.add_command(label=u"\u03B5" + u"\u02E3", command=lambda: graphic("ex"))
+        submenu2.add_command(label=u"\u03B5" + u"\u1DBB", command=lambda: graphic("ez"))
+        submenu2.add_command(label=u"\u03B3" + u"\u02E3" + u"\u1DBB", command=lambda: graphic("exz"))
+        fileMenu.add_cascade(label='Strains', menu=submenu2, underline=0)
+        menubar.add_cascade(label="Results", menu=fileMenu)
+
+
     def input(self):
         E = float(self.E_ent.get())
         nu = float(self.nu_ent.get())
@@ -503,12 +681,8 @@ class Application(Frame):
                         kj = l + 1
                         km = l + nh + 1
                         # Stiffness_matrix_element
-                        xi = kx[j - 1, i - 1]
-                        xj = kx[j, i - 1]
-                        xm = kx[j - 1, i]
-                        zi = kz[j - 1, i - 1]
-                        zj = kz[j, i - 1]
-                        zm = kz[j - 1, i]
+                        xi, xj, xm = kx[j - 1, i - 1], kx[j, i - 1], kx[j - 1, i]
+                        zi, zj, zm = kz[j - 1, i - 1], kz[j, i - 1], kz[j - 1, i]
                         BT = geometry_matrix_element(B, xi, xj, xm, zi, zj, zm)
                         D = elastic_matrix_element(D, E, nu)
                         D = plastic_matrix_element(k, it, sx, sz, txz, kst, nu, fi, D, pl, E)
@@ -521,12 +695,8 @@ class Application(Frame):
                         kj = m + nh
                         km = m + nh + 1
                         # Stiffness_matrix_element
-                        xi = kx[j, i - 1]
-                        xj = kx[j - 1, i]
-                        xm = kx[j, i]
-                        zi = kz[j, i - 1]
-                        zj = kz[j - 1, i]
-                        zm = kz[j, i]
+                        xi, xj, xm = kx[j, i - 1], kx[j - 1, i], kx[j, i]
+                        zi, zj, zm = kz[j, i - 1], kz[j - 1, i], kz[j, i]
                         BT = geometry_matrix_element(B, xi, xj, xm, zi, zj, zm)
                         D = elastic_matrix_element(D, E, nu)
                         D = plastic_matrix_element(k, it, sx, sz, txz, kst, nu, fi, D, pl, E)
@@ -563,19 +733,15 @@ class Application(Frame):
                         ki = l
                         kj = l + 1
                         km = l + nh + 1
-                        xi = kx[j - 1, i - 1]
-                        xj = kx[j, i - 1]
-                        xm = kx[j - 1, i]
-                        zi = kz[j - 1, i - 1]
-                        zj = kz[j, i - 1]
-                        zm = kz[j - 1, i]
+                        xi, xj, xm = kx[j - 1, i - 1], kx[j, i - 1], kx[j - 1, i]
+                        zi, zj, zm = kz[j - 1, i - 1], kz[j, i - 1], kz[j - 1, i]
                         B = np.transpose(geometry_matrix_element(B, xi, xj, xm, zi, zj, zm))
                         D = elastic_matrix_element(D, E, nu)
                         D = plastic_matrix_element(k, it, sx, sz, txz, kst, nu, fi, D, pl, E)
                         dex, dez, dexz, ex, ez, exz = strains(du, B, ki, kj, km, k, dex, dez, dexz, kst, ex, ez, exz)
                         if average == 0:
-                            dex, dez, dexz, sx, sz, txz, s1, s3 = stresses(D, dex, dez, dexz, k, dsx, dsz,
-                                                                           dtxz, s1, s3, kst, sx, sz, txz)
+                            sx, sz, txz, s1, s3 = stresses(D, dex, dez, dexz, k, dsx, dsz,
+                                                           dtxz, s1, s3, kst, sx, sz, txz)
                             sx, sz, txz, ex, ez, exz, dR, npl, Fp, FF, dex, dez, dexz = \
                                 function_plastic(sx, sz, txz, kst, k, fi, c, it, Fp, FF, pl, npl,
                                                  nu, xi, xj, xm, zi, zj, zm, ki, kj, km, B, dR, dex,
@@ -586,26 +752,22 @@ class Application(Frame):
                         ki = m
                         kj = m + nh
                         km = m + nh + 1
-                        xi = kx[j, i - 1]
-                        xj = kx[j - 1, i]
-                        xm = kx[j, i]
-                        zi = kz[j, i - 1]
-                        zj = kz[j - 1, i]
-                        zm = kz[j, i]
+                        xi, xj, xm = kx[j, i - 1], kx[j - 1, i], kx[j, i]
+                        zi, zj, zm = kz[j, i - 1], kz[j - 1, i], kz[j, i]
                         B = np.transpose(geometry_matrix_element(B, xi, xj, xm, zi, zj, zm))
                         D = elastic_matrix_element(D, E, nu)
                         D = plastic_matrix_element(k, it, sx, sz, txz, kst, nu, fi, D, pl, E)
                         dex, dez, dexz, ex, ez, exz = strains(du, B, ki, kj, km, k, dex, dez, dexz, kst, ex, ez, exz)
                         if average == 0:
-                            dex, dez, dexz, sx, sz, txz, s1, s3 = stresses(D, dex, dez, dexz, k, dsx, dsz,
-                                                                           dtxz, s1, s3, kst, sx, sz, txz)
+                            sx, sz, txz, s1, s3 = stresses(D, dex, dez, dexz, k, dsx, dsz,
+                                                           dtxz, s1, s3, kst, sx, sz, txz)
                             sx, sz, txz, ex, ez, exz, dR, npl, Fp, FF, dex, dez, dexz = \
                                 function_plastic(sx, sz, txz, kst, k, fi, c, it, Fp, FF, pl, npl,
                                                  nu, xi, xj, xm, zi, zj, zm, ki, kj, km, B, dR, dex,
                                                  dez, dexz, ex, ez, exz, E, plastic, average)
                         if average == 1:
-                            dex, dez, dexz, sx, sz, txz, s1, s3 = stress_average(k, dex, dez, dexz, D, dsx,
-                                                                                 dsz, dtxz, kst, sx, sz, txz, s1, s3)
+                            sx, sz, txz, s1, s3 = stress_average(k, dex, dez, dexz, D, dsx,
+                                                                 dsz, dtxz, kst, sx, sz, txz, s1, s3)
                             sx, sz, txz, ex, ez, exz, dR, npl, Fp, FF, dex, dez, dexz = \
                                 function_plastic(sx, sz, txz, kst, k, fi, c, it, Fp, FF, pl, npl,
                                                  nu, xi, xj, xm, zi, zj, zm, ki, kj, km, B, dR, dex,
@@ -641,23 +803,22 @@ class Application(Frame):
         for i in range(nh):
             for j in range(nw):
                 ax.plot([kx[i + 1, j], kx[i, j + 1]], [-kz[i + 1, j], -kz[i, j + 1]], color='blue', linewidth=0.4)
-
-        ax.plot(kx_new, -kz_new, color='red', linewidth=0.4)
-        ax.plot(kxt_new, -kzt_new, color='red', linewidth=0.4)
-        for i in range(nh):
-            for j in range(nw):
-                ax.plot([kx_new[i + 1, j], kx_new[i, j + 1]], [-kz_new[i + 1, j], -kz_new[i, j + 1]], color='red',
-                        linewidth=0.4)
-
-        for i in range(nh + 1):
-            for j in range(nw + 1):
-                ax.text(kx[i, j], -kz[i, j], n_nmb[i, j].astype(int), fontsize=5, fontstyle='italic')
         ax.xaxis.set_major_locator(ticker.MultipleLocator(0.5))
         ax.yaxis.set_major_locator(ticker.MultipleLocator(0.5))
         canvas.draw()
         canvas.get_tk_widget().place(x=175, y=0)
+        global kx_glob, kz_glob, kxt_glob, kzt_glob, kx_new_glob, kz_new_glob, kxt_new_glob, \
+            kzt_new_glob, nw_glob, nh_glob, pl_glob, s1_glob, s3_glob, sx_glob, sz_glob, \
+            txz_glob, ex_glob, ez_glob, exz_glob, n_nmb_glob
+        kx_glob, kz_glob, kxt_glob, kzt_glob, kx_new_glob, kz_new_glob, kxt_new_glob, \
+        kzt_new_glob, nw_glob, nh_glob, pl_glob, s1_glob, s3_glob, sx_glob, sz_glob, \
+        txz_glob, ex_glob, ez_glob, exz_glob, n_nmb_glob = kx, kz, kxt, kzt, kx_new, kz_new, \
+                                               kxt_new, kzt_new, nw, nh, pl, s1, s3, sx, sz, \
+                                               txz, ex, ez, exz, n_nmb
 
-        # Table_creation
+        return
+
+    """# Table_creation
         fill = PatternFill(fill_type='solid',
                            start_color='c1c1c1',
                            end_color='c2c2c2')
@@ -738,7 +899,7 @@ class Application(Frame):
             ws.cell(row=i + 2, column=9).border = border
             ws.cell(row=i + 2, column=9).number_format = '0.000'
 
-        """# второй лист
+        # второй лист
         ws1 = wb.create_sheet("Матрица жесткости")
         ws1.sheet_view.zoomScale = 85
         for i in range(n * 2):
@@ -746,13 +907,13 @@ class Application(Frame):
                 ws1.cell(row=i + 1, column=j + 1).value = kglob[i, j]
                 ws1.cell(row=i + 1, column=j + 1).alignment = align_center
                 ws1.cell(row=i + 1, column=j + 1).border = border
-                ws1.cell(row=i + 1, column=j + 1).number_format = '0.00'"""
+                ws1.cell(row=i + 1, column=j + 1).number_format = '0.00'
 
-        wb.save("Results.xlsx")
+        wb.save("Results.xlsx")"""
 
 
 main_window = Tk()
-main_window.title("FEM elastic plastic")
+main_window.title("FEM elastic plastic change")
 main_window.geometry("820x485")
 fig = Figure()
 ax = fig.add_subplot()
@@ -763,6 +924,6 @@ canvas.draw()
 toolbar = NavigationToolbar2Tk(canvas, main_window)
 toolbar.update()
 toolbar.place(x=175, y=0)
-canvas.get_tk_widget().place(x=175, y=0)
+canvas.get_tk_widget().place(x=175, y=0, relwidth=0.85, relheight=1)
 app = Application(main_window)
 main_window.mainloop()
