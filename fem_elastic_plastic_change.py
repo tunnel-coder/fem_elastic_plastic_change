@@ -35,10 +35,10 @@ def geometry_matrix_element(B, xi, xj, xm, zi, zj, zm):
     B[2, 4] = B[1, 5]
     B[2, 5] = B[0, 4]
     BT = np.transpose(B)
-    return BT
+    return dlt, BT, B
 
 
-@njit
+@njit(fastmath=True)
 def elastic_matrix_element(D, E, nu):
     Enu = E / (1 + nu)
     D[0, 0] = (1 - nu) / (1 - 2 * nu) * Enu
@@ -53,7 +53,7 @@ def elastic_matrix_element(D, E, nu):
     return D
 
 
-@njit
+@njit(fastmath=True)
 def plastic_matrix_element(k, it, sx, sz, txz, kst, nu, fi, D, pl, E):
     if pl[k - 1] == 0:
         return D
@@ -85,16 +85,9 @@ def plastic_matrix_element(k, it, sx, sz, txz, kst, nu, fi, D, pl, E):
     return D
 
 
-def stiffness_matrix_local(BT, D, B, xi, xj, xm, zi, zj, zm):
-    dlt = xi * (zj - zm) + xj * (zm - zi) + xm * (zi - zj)
-    dlt = np.abs(dlt) / 2
-    BTD = np.dot(BT, D)
-    BTDB = np.dot(BTD, B)
-    kloc = BTDB * dlt
-    return kloc
-
-
-def stiffness_matrix_total(kglob, ki, kj, kloc, km):
+@njit(fastmath=True)
+def stiffness_matrix_total(BT, D, B, dlt, kglob, ki, kj, km):
+    kloc = np.dot(np.dot(BT, D), B) * np.abs(dlt) / 2
     nk1 = 0
     nk2 = 0
     for i1 in range(0, 6):
@@ -115,7 +108,7 @@ def stiffness_matrix_total(kglob, ki, kj, kloc, km):
     return kglob
 
 
-@njit
+@njit(fastmath=True)
 def strains(du, B, ki, kj, km, k, dex, dez, dexz, kst, ex, ez, exz):
     dex[k - 1] = (du[2 * ki - 2] * B[0, 0] + du[2 * kj - 2] * B[0, 2] + du[2 * km - 2] * B[0, 4])
     dez[k - 1] = (du[2 * ki - 1] * B[1, 1] + du[2 * kj - 1] * B[1, 3] + du[2 * km - 1] * B[1, 5])
@@ -132,7 +125,7 @@ def strains(du, B, ki, kj, km, k, dex, dez, dexz, kst, ex, ez, exz):
     return dex, dez, dexz, ex, ez, exz
 
 
-@njit
+@njit(fastmath=True)
 def stresses(D, dex, dez, dexz, k, dsx, dsz, dtxz, s1, s3, kst, sx, sz, txz):
     dsx[k - 1] = D[0, 0] * dex[k - 1] + D[0, 1] * dez[k - 1] + D[0, 2] * dexz[k - 1]
     dsz[k - 1] = D[1, 0] * dex[k - 1] + D[1, 1] * dez[k - 1] + D[1, 2] * dexz[k - 1]
@@ -155,6 +148,7 @@ def stresses(D, dex, dez, dexz, k, dsx, dsz, dtxz, s1, s3, kst, sx, sz, txz):
     return sx, sz, txz, s1, s3
 
 
+@njit(fastmath=True)
 def stress_average(k, dex, dez, dexz, D, dsx, dsz, dtxz, kst, sx, sz, txz, s1, s3):
     dex[k - 1] = (dex[k - 1] + dex[k - 2]) / 2
     dez[k - 1] = (dez[k - 1] + dez[k - 2]) / 2
@@ -188,16 +182,16 @@ def stress_average(k, dex, dez, dexz, D, dsx, dsz, dtxz, kst, sx, sz, txz, s1, s
     return sx, sz, txz, s1, s3
 
 
-@njit
+@njit(fastmath=True)
 def funcplast(sxFp, szFp, txzFp, fi, c):
     return np.sqrt((szFp - sxFp) ** 2 + 4 * txzFp ** 2) - ((szFp + sxFp) * np.sin(fi) + 2 * c * np.cos(fi))
 
 
-@njit
-def function_plastic(sx, sz, txz, kst, k, fi, c, it, Fp, FF, pl, npl, nu, xi, xj, xm, zi, zj, zm, ki, kj, km, B, dR,
+@njit(fastmath=True)
+def function_plastic(sx, sz, txz, kst, k, fi, c, it, Fp, FF, pl, nu, dlt, ki, kj, km, B, dR,
                      dex, dez, dexz, ex, ez, exz, E, plastic, average):
     if plastic == 0:
-        return sx, sz, txz, ex, ez, exz, dR, npl, Fp, FF, dex, dez, dexz
+        return sx, sz, txz, ex, ez, exz, dR, Fp, FF, dex, dez, dexz
     Fpst = funcplast(sx[kst - 1, k - 1], sz[kst - 1, k - 1], txz[kst - 1, k - 1], fi, c)
     Fp[kst - 1, k - 1] = Fpst
     FF[kst - 1, k - 1, it - 1] = Fpst
@@ -205,14 +199,12 @@ def function_plastic(sx, sz, txz, kst, k, fi, c, it, Fp, FF, pl, npl, nu, xi, xj
         Fp[kst - 1, k - 2] = Fp[kst - 1, k - 1]
         FF[kst - 1, k - 2, it - 1] = Fpst
     if Fpst < 0:
-        return sx, sz, txz, ex, ez, exz, dR, npl, Fp, FF, dex, dez, dexz
+        return sx, sz, txz, ex, ez, exz, dR, Fp, FF, dex, dez, dexz
     if pl[k - 1] == 1:
-        return sx, sz, txz, ex, ez, exz, dR, npl, Fp, FF, dex, dez, dexz
+        return sx, sz, txz, ex, ez, exz, dR, Fp, FF, dex, dez, dexz
     pl[k - 1] = 1
-    npl[kst - 1, it - 1] = npl[kst - 1, it - 1] + 1
     if average == 1:
-        pl[k - 2] = 8
-        npl[kst - 1, it - 1] = npl[kst - 1, it - 1] + 1
+        pl[k - 2] = 1
     sxF = 0
     szF = 0
     txzF = 0
@@ -233,7 +225,6 @@ def function_plastic(sx, sz, txz, kst, k, fi, c, it, Fp, FF, pl, npl, nu, xi, xj
                 sx[kst - 1, k - 2] = sxF
                 sz[kst - 1, k - 2] = szF
                 txz[kst - 1, k - 2] = txzF
-            break
     a0 = szF - sxF
     a1 = np.sqrt((szF - sxF) ** 2 + 4 * txzF ** 2)
     p1 = -a0 / a1 - np.sin(fi) / (1 - 2 * nu)
@@ -248,7 +239,7 @@ def function_plastic(sx, sz, txz, kst, k, fi, c, it, Fp, FF, pl, npl, nu, xi, xj
     a2 = p2 * a6 / q0
     a3 = p3 * a6 / q0
 
-    dlt = np.abs(xi * (zj - zm) + xj * (zm - zi) + xm * (zi - zj)) / 2
+    dlt = np.abs(dlt) / 2
 
     dR[2 * ki - 2] = dR[2 * ki - 2] - dlt * (a1 * B[0, 0] + a3 * B[2, 0])
     dR[2 * ki - 1] = dR[2 * ki - 1] - dlt * (a2 * B[1, 1] + a3 * B[2, 1])
@@ -285,7 +276,7 @@ def function_plastic(sx, sz, txz, kst, k, fi, c, it, Fp, FF, pl, npl, nu, xi, xj
         ex[kst - 1, k - 1] = ex[kst - 1, k - 2]
         ez[kst - 1, k - 1] = ez[kst - 1, k - 2]
         exz[kst - 1, k - 1] = exz[kst - 1, k - 2]
-    return sx, sz, txz, ex, ez, exz, dR, npl, Fp, FF, dex, dez, dexz
+    return sx, sz, txz, ex, ez, exz, dR, Fp, FF, dex, dez, dexz
 
 
 # noinspection PyGlobalUndefined
@@ -414,7 +405,6 @@ def graphic(var):
                 ax.fill(xs, zs, "#FF0000")
     ax.xaxis.set_major_locator(ticker.MultipleLocator(0.5))
     ax.yaxis.set_major_locator(ticker.MultipleLocator(0.5))
-
     canvas.draw()
     canvas.get_tk_widget().place(x=175, y=0)
     return
@@ -429,6 +419,7 @@ def node_numb():
     ax.yaxis.set_major_locator(ticker.MultipleLocator(0.5))
     canvas.draw()
     canvas.get_tk_widget().place(x=175, y=0)
+    return
 
 
 class Application(Frame):
@@ -574,7 +565,6 @@ class Application(Frame):
         fileMenu.add_cascade(label='Strains', menu=submenu2, underline=0)
         menubar.add_cascade(label="Results", menu=fileMenu)
 
-
     def input(self):
         E = float(self.E_ent.get())
         nu = float(self.nu_ent.get())
@@ -628,7 +618,6 @@ class Application(Frame):
         pl = np.zeros(nel)
         Fp = np.zeros((nst, nel))
         FF = np.zeros((nst, nel, niter))
-        npl = np.zeros((nst, niter))
         u = np.zeros((nst, n * 2))
         R = np.zeros((nst, n * 2))
 
@@ -659,7 +648,7 @@ class Application(Frame):
                 number += 1
 
         dp = p_load / nst
-        for kst in range(0, nst + 1):
+        for kst in range(1, nst + 1):
             if plastic == 0:
                 kst = 1
             # Displacements_and_stresses_are_zero
@@ -683,11 +672,10 @@ class Application(Frame):
                         # Stiffness_matrix_element
                         xi, xj, xm = kx[j - 1, i - 1], kx[j, i - 1], kx[j - 1, i]
                         zi, zj, zm = kz[j - 1, i - 1], kz[j, i - 1], kz[j - 1, i]
-                        BT = geometry_matrix_element(B, xi, xj, xm, zi, zj, zm)
+                        dlt, BT, B = geometry_matrix_element(B, xi, xj, xm, zi, zj, zm)
                         D = elastic_matrix_element(D, E, nu)
                         D = plastic_matrix_element(k, it, sx, sz, txz, kst, nu, fi, D, pl, E)
-                        kloc = stiffness_matrix_local(BT, D, B, xi, xj, xm, zi, zj, zm)
-                        kglob = stiffness_matrix_total(kglob, ki, kj, kloc, km)
+                        kglob = stiffness_matrix_total(BT, D, B, dlt, kglob, ki, kj, km)
 
                         k = k + 1
                         m = (k + 2) // 2 + i - 1
@@ -697,11 +685,10 @@ class Application(Frame):
                         # Stiffness_matrix_element
                         xi, xj, xm = kx[j, i - 1], kx[j - 1, i], kx[j, i]
                         zi, zj, zm = kz[j, i - 1], kz[j - 1, i], kz[j, i]
-                        BT = geometry_matrix_element(B, xi, xj, xm, zi, zj, zm)
+                        dlt, BT, B = geometry_matrix_element(B, xi, xj, xm, zi, zj, zm)
                         D = elastic_matrix_element(D, E, nu)
                         D = plastic_matrix_element(k, it, sx, sz, txz, kst, nu, fi, D, pl, E)
-                        kloc = stiffness_matrix_local(BT, D, B, xi, xj, xm, zi, zj, zm)
-                        kglob = stiffness_matrix_total(kglob, ki, kj, kloc, km)
+                        kglob = stiffness_matrix_total(BT, D, B, dlt, kglob, ki, kj, km)
 
                 # Boundary conditions
                 for i in range(1, nb + 2):
@@ -735,16 +722,16 @@ class Application(Frame):
                         km = l + nh + 1
                         xi, xj, xm = kx[j - 1, i - 1], kx[j, i - 1], kx[j - 1, i]
                         zi, zj, zm = kz[j - 1, i - 1], kz[j, i - 1], kz[j - 1, i]
-                        B = np.transpose(geometry_matrix_element(B, xi, xj, xm, zi, zj, zm))
+                        dlt, BT, B = geometry_matrix_element(B, xi, xj, xm, zi, zj, zm)
                         D = elastic_matrix_element(D, E, nu)
                         D = plastic_matrix_element(k, it, sx, sz, txz, kst, nu, fi, D, pl, E)
                         dex, dez, dexz, ex, ez, exz = strains(du, B, ki, kj, km, k, dex, dez, dexz, kst, ex, ez, exz)
                         if average == 0:
                             sx, sz, txz, s1, s3 = stresses(D, dex, dez, dexz, k, dsx, dsz,
                                                            dtxz, s1, s3, kst, sx, sz, txz)
-                            sx, sz, txz, ex, ez, exz, dR, npl, Fp, FF, dex, dez, dexz = \
-                                function_plastic(sx, sz, txz, kst, k, fi, c, it, Fp, FF, pl, npl,
-                                                 nu, xi, xj, xm, zi, zj, zm, ki, kj, km, B, dR, dex,
+                            sx, sz, txz, ex, ez, exz, dR, Fp, FF, dex, dez, dexz = \
+                                function_plastic(sx, sz, txz, kst, k, fi, c, it, Fp, FF, pl,
+                                                 nu, dlt, ki, kj, km, B, dR, dex,
                                                  dez, dexz, ex, ez, exz, E, plastic, average)
 
                         k = k + 1
@@ -754,23 +741,23 @@ class Application(Frame):
                         km = m + nh + 1
                         xi, xj, xm = kx[j, i - 1], kx[j - 1, i], kx[j, i]
                         zi, zj, zm = kz[j, i - 1], kz[j - 1, i], kz[j, i]
-                        B = np.transpose(geometry_matrix_element(B, xi, xj, xm, zi, zj, zm))
+                        dlt, BT, B = geometry_matrix_element(B, xi, xj, xm, zi, zj, zm)
                         D = elastic_matrix_element(D, E, nu)
                         D = plastic_matrix_element(k, it, sx, sz, txz, kst, nu, fi, D, pl, E)
                         dex, dez, dexz, ex, ez, exz = strains(du, B, ki, kj, km, k, dex, dez, dexz, kst, ex, ez, exz)
                         if average == 0:
                             sx, sz, txz, s1, s3 = stresses(D, dex, dez, dexz, k, dsx, dsz,
                                                            dtxz, s1, s3, kst, sx, sz, txz)
-                            sx, sz, txz, ex, ez, exz, dR, npl, Fp, FF, dex, dez, dexz = \
-                                function_plastic(sx, sz, txz, kst, k, fi, c, it, Fp, FF, pl, npl,
-                                                 nu, xi, xj, xm, zi, zj, zm, ki, kj, km, B, dR, dex,
+                            sx, sz, txz, ex, ez, exz, dR, Fp, FF, dex, dez, dexz = \
+                                function_plastic(sx, sz, txz, kst, k, fi, c, it, Fp, FF, pl,
+                                                 nu, dlt, ki, kj, km, B, dR, dex,
                                                  dez, dexz, ex, ez, exz, E, plastic, average)
                         if average == 1:
                             sx, sz, txz, s1, s3 = stress_average(k, dex, dez, dexz, D, dsx,
                                                                  dsz, dtxz, kst, sx, sz, txz, s1, s3)
-                            sx, sz, txz, ex, ez, exz, dR, npl, Fp, FF, dex, dez, dexz = \
-                                function_plastic(sx, sz, txz, kst, k, fi, c, it, Fp, FF, pl, npl,
-                                                 nu, xi, xj, xm, zi, zj, zm, ki, kj, km, B, dR, dex,
+                            sx, sz, txz, ex, ez, exz, dR, Fp, FF, dex, dez, dexz = \
+                                function_plastic(sx, sz, txz, kst, k, fi, c, it, Fp, FF, pl,
+                                                 nu, dlt, ki, kj, km, B, dR, dex,
                                                  dez, dexz, ex, ez, exz, E, plastic, average)
 
             for z in range(0, n * 2 + 1):
@@ -813,9 +800,8 @@ class Application(Frame):
         kx_glob, kz_glob, kxt_glob, kzt_glob, kx_new_glob, kz_new_glob, kxt_new_glob, \
         kzt_new_glob, nw_glob, nh_glob, pl_glob, s1_glob, s3_glob, sx_glob, sz_glob, \
         txz_glob, ex_glob, ez_glob, exz_glob, n_nmb_glob = kx, kz, kxt, kzt, kx_new, kz_new, \
-                                               kxt_new, kzt_new, nw, nh, pl, s1, s3, sx, sz, \
-                                               txz, ex, ez, exz, n_nmb
-
+                                                           kxt_new, kzt_new, nw, nh, pl, s1, s3, sx, sz, \
+                                                           txz, ex, ez, exz, n_nmb
         return
 
     """# Table_creation
