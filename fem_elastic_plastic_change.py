@@ -335,6 +335,7 @@ def pl_st():
                 ax.fill(xs, zs, "crimson")
             else:
                 ax.fill(xs, zs, "dodgerblue")
+    ax.set_title("Plastic status")
     ax.xaxis.set_major_locator(ticker.MultipleLocator(0.5))
     ax.yaxis.set_major_locator(ticker.MultipleLocator(0.5))
     canvas.draw()
@@ -344,24 +345,32 @@ def pl_st():
 
 def graphic(var):
     kx, kz, nw, nh = kx_glob, kz_glob, nw_glob, nh_glob
+    ax.clear()
     if var == "s1":
         s = s1_glob
+        ax.set_title(u"\u03C3" + u"\u00B9")
     elif var == "s3":
         s = s3_glob
+        ax.set_title(u"\u03C3" + u"\u00B3")
     elif var == "sx":
         s = sx_glob
+        ax.set_title(u"\u03C3" + u"\u02E3")
     elif var == "sz":
         s = sz_glob
+        ax.set_title(u"\u03C3" + u"\u1DBB")
     elif var == "txz":
         s = txz_glob
+        ax.set_title(u"\u03C4" + u"\u02E3" + u"\u1DBB")
     elif var == "ex":
         s = ex_glob
+        ax.set_title(u"\u03B5" + u"\u02E3")
     elif var == "ez":
         s = ez_glob
+        ax.set_title(u"\u03B5" + u"\u1DBB")
     elif var == "exz":
         s = exz_glob
+        ax.set_title(u"\u03B3" + u"\u02E3" + u"\u1DBB")
 
-    ax.clear()
     s_max = np.amax(s[-1, :])
     s_min = np.amin(s[-1, :])
     s_prom = (s_max - s_min) / 6
@@ -374,17 +383,17 @@ def graphic(var):
             coord = [[xi, -zi], [xj, -zj], [xm, -zm], [xi, -zi]]
             xs, zs = zip(*coord)
             if s[-1, k - 1] <= (s_min + s_prom):
-                ax.fill(xs, zs, "#0000FF")
+                ax.fill(xs, zs, "#0000e7")
             elif s[-1, k - 1] <= (s_min + 2 * s_prom):
-                ax.fill(xs, zs, "#3300CC")
+                ax.fill(xs, zs, "#00d0e7")
             elif s[-1, k - 1] <= (s_min + 3 * s_prom):
-                ax.fill(xs, zs, "#660099")
+                ax.fill(xs, zs, "#00e750")
             elif s[-1, k - 1] <= (s_min + 4 * s_prom):
-                ax.fill(xs, zs, "#990066")
+                ax.fill(xs, zs, "#50e700")
             elif s[-1, k - 1] <= (s_min + 5 * s_prom):
-                ax.fill(xs, zs, "#CC0033")
+                ax.fill(xs, zs, "#e7d000")
             else:
-                ax.fill(xs, zs, "#FF0000")
+                ax.fill(xs, zs, "#e70000")
 
             k = k + 1
             xi, xj, xm = kx[j, i - 1], kx[j - 1, i], kx[j, i]
@@ -392,17 +401,17 @@ def graphic(var):
             coord = [[xi, -zi], [xj, -zj], [xm, -zm], [xi, -zi]]
             xs, zs = zip(*coord)
             if s[-1, k - 1] <= (s_min + s_prom):
-                ax.fill(xs, zs, "#0000FF")
+                ax.fill(xs, zs, "#0000e7")
             elif s[-1, k - 1] <= (s_min + 2 * s_prom):
-                ax.fill(xs, zs, "#3300CC")
+                ax.fill(xs, zs, "#00d0e7")
             elif s[-1, k - 1] <= (s_min + 3 * s_prom):
-                ax.fill(xs, zs, "#660099")
+                ax.fill(xs, zs, "#00e750")
             elif s[-1, k - 1] <= (s_min + 4 * s_prom):
-                ax.fill(xs, zs, "#990066")
+                ax.fill(xs, zs, "#00ff00")
             elif s[-1, k - 1] <= (s_min + 5 * s_prom):
-                ax.fill(xs, zs, "#CC0033")
+                ax.fill(xs, zs, "#e7d000")
             else:
-                ax.fill(xs, zs, "#FF0000")
+                ax.fill(xs, zs, "#e70000")
     ax.xaxis.set_major_locator(ticker.MultipleLocator(0.5))
     ax.yaxis.set_major_locator(ticker.MultipleLocator(0.5))
     canvas.draw()
@@ -701,10 +710,10 @@ class Application(Frame):
                     j = i * 2
                     kglob[j - 2, j - 2] = 10 ** 16
                     j = (n - i + 1) * 2
-                    kglob[j - 1, j - 1] = 10 ** 16
+                    "kglob[j - 1, j - 1] = 10 ** 16"
                     kglob[j - 2, j - 2] = 10 ** 16
 
-                for i in range(nh + 1, n, nh + 1):
+                for i in range(nh + 1, n + 1, nh + 1):
                     j = i * 2
                     kglob[j - 1, j - 1] = 10 ** 16
 
